@@ -2,8 +2,8 @@
 'use strict';
 
 const TABS = [
-  ['scan', 'المسح', '📷'], ['inventory', 'الجرد', '📋'], ['stock', 'الرصيد', '📦'],
-  ['compare', 'المقارنة', '📈'], ['products', 'المنتجات', '🗂️'], ['prices', 'الأسعار', '🏷️'],
+  ['scan', 'المسح'], ['inventory', 'الجرد'], ['stock', 'الرصيد'],
+  ['compare', 'المقارنة'], ['products', 'المنتجات'], ['prices', 'الأسعار'],
 ];
 
 (async function main() {
@@ -26,17 +26,17 @@ const TABS = [
 
   const tabBar = h('nav', { class: 'tabs' });
   const main = h('main');
-  const stat = (l, el) => h('div', { class: 'stat' }, el, h('span', null, l));
-  const theme = localStorage.getItem('theme');
-  if (theme) document.documentElement.dataset.theme = theme;
-  const themeBtn = h('button', { class: 'icon-btn', 'aria-label': 'الوضع الليلي', onclick: () => {
-    const dark = (document.documentElement.dataset.theme || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')) === 'dark';
-    document.documentElement.dataset.theme = dark ? 'light' : 'dark'; localStorage.setItem('theme', dark ? 'light' : 'dark');
+  const stat = (l, el) => h('div', { class: 'stat' }, el, h('span', null, l), h('i'));
+  // الافتراضي فاتح مثل التطبيق؛ زر ☀️/🌙 يبدّل ويُحفظ
+  const applyTheme = (th) => { document.documentElement.dataset.theme = th; themeBtn.textContent = th === 'dark' ? '☀️' : '🌙'; };
+  const themeBtn = h('button', { class: 'hbtn start', 'aria-label': 'الوضع الليلي', onclick: () => {
+    const th = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'; localStorage.setItem('theme', th); applyTheme(th);
   } }, '🌙');
-  const menuBtn = h('button', { class: 'icon-btn', 'aria-label': 'النسخ الاحتياطي', onclick: backupMenu }, '☰');
+  applyTheme(localStorage.getItem('theme') === 'dark' ? 'dark' : 'light');
+  const menuBtn = h('button', { class: 'hbtn end', 'aria-label': 'النسخ الاحتياطي', onclick: backupMenu }, '☰');
 
   function backupMenu() {
-    dialog({ title: 'النسخ الاحتياطي', message: 'كل بياناتك محفوظة داخل هذا المتصفح فقط. احفظ نسخة احتياطية لتنقلها إلى جهاز آخر أو لتحميها من الضياع.',
+    dialog({ title: 'النسخ الاحتياطي', icon: 'upload', message: 'كل بياناتك محفوظة داخل هذا المتصفح فقط. احفظ نسخة احتياطية لتنقلها إلى جهاز آخر أو لتحميها من الضياع.',
       buttons: [
         { label: 'إغلاق' },
         { label: '⬇ حفظ نسخة احتياطية', kind: 'primary', onclick: () => {
@@ -63,13 +63,13 @@ const TABS = [
     localStorage.setItem('tab', key);
     scrollTo(0, 0);
   }
-  for (const [key, label, icon] of TABS) {
-    tabBar.append(h('button', { 'data-k': key, class: 't-' + key, onclick: () => show(key) }, h('i', null, icon), h('span', null, label)));
+  for (const [key, label] of TABS) {
+    tabBar.append(h('button', { 'data-k': key, class: 't-' + key, onclick: () => show(key) }, h('span', { class: 'ic' }, ico(key)), h('span', { class: 'lb' }, label)));
     const v = Views[key](app); v.dirty = false; app.views[key] = v; v.el.style.display = 'none'; main.append(v.el);
   }
   document.getElementById('app').append(
-    h('header', null, h('div', { class: 'hd' }, menuBtn, h('h1', null, 'جرد & مخزون & أسعار'), themeBtn),
-      h('div', { class: 'stats' }, stat('إجمالي المنتجات', stats.products), stat('أصناف مجرودة', stats.items), stat('عمليات الجرد', stats.ops))),
+    h('header', null, themeBtn, h('h1', null, 'جرد & مخزون & أسعار'), menuBtn),
+    h('div', { class: 'stats' }, stat('إجمالي المنتجات', stats.products), stat('أصناف مجرودة', stats.items), stat('عمليات الجرد', stats.ops)),
     tabBar, main);
   boot.remove();
   updateStats();
