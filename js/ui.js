@@ -151,27 +151,54 @@ class CameraScanner {
       return back.sort((x, y) => score(y) - score(x))[0].deviceId || null;
     } catch (e) { return null; }
   }
-  async open(deviceId) {
-    const v = { width: { ideal: 2560 }, height: { ideal: 1920 }, frameRate: { ideal: 30 } };
-    if (deviceId) v.deviceId = { exact: deviceId }; else v.facingMode = { ideal: 'environment' };
+  async open(deviceId, level) {
+    let v;
+    if (level === 0) v = { width: { ideal: 1920 }, height: { ideal: 1080 } };
+    else if (level === 1) v = { width: { ideal: 1280 }, height: { ideal: 720 } };
+    else v = true;                       // أبسط طلب ممكن
+    if (v !== true) { if (deviceId) v.deviceId = { exact: deviceId }; else v.facingMode = { ideal: 'environment' }; }
     return navigator.mediaDevices.getUserMedia({ video: v, audio: false });
+  }
+  // ننتظر ظهور إطارات فعلية (الشاشة السوداء = لا إطارات)
+  async attach(stream) {
+    const v = this.video;
+    v.srcObject = stream; v.muted = true;
+    v.setAttribute('playsinline', 'true'); v.setAttribute('webkit-playsinline', 'true');
+    try { await v.play(); } catch (e) {}
+    const t0 = Date.now();
+    while (Date.now() - t0 < 3000) {
+      if (v.readyState >= 2 && v.videoWidth > 0 && v.currentTime > 0) return true;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    return false;
   }
   async start() {
     this.stop();
     this.running = true;
-    try {
-      this.stream = await this.open(null);
-      const cur = this.stream.getVideoTracks()[0].getSettings().deviceId;
-      const best = await this.pickBack();      // التسميات لا تظهر إلا بعد منح الإذن
-      if (best && best !== cur && this.running) {
-        try { const s2 = await this.open(best); this.stream.getTracks().forEach((t) => t.stop()); this.stream = s2; } catch (e) { /* نبقى على العدسة الحالية */ }
+    let ok = false, lastErr = null, best = null;
+    for (let level = 0; level < 3 && this.running && !ok; level++) {
+      try {
+        this.stream = await this.open(level === 0 ? null : null, level);
+        if (level === 0 && this.running) {
+          const cur = this.stream.getVideoTracks()[0].getSettings().deviceId;
+          best = await this.pickBack();            // التسميات لا تظهر إلا بعد منح الإذن
+          if (best && best !== cur) {
+            // نغلق الأولى قبل فتح الثانية (بعض الهواتف لا تسمح بكاميرتين معاً)
+            this.stream.getTracks().forEach((t) => t.stop()); this.stream = null;
+            try { this.stream = await this.open(best, 0); }
+            catch (e) { this.stream = await this.open(null, 0); }
+          }
+        }
+        ok = await this.attach(this.stream);
+        if (!ok) { this.stream.getTracks().forEach((t) => t.stop()); this.stream = null; }
+      } catch (e) {
+        lastErr = e;
+        if (e && (e.name === 'NotAllowedError' || e.name === 'SecurityError')) break;
+        if (this.stream) { this.stream.getTracks().forEach((t) => t.stop()); this.stream = null; }
       }
-    } catch (e) { this.running = false; this.onError(e); return; }
+    }
     if (!this.running) { this.stop(); return; }
-    this.video.srcObject = this.stream;
-    this.video.muted = true;
-    this.video.setAttribute('playsinline', 'true'); this.video.setAttribute('webkit-playsinline', 'true');
-    try { await this.video.play(); } catch (e) {}
+    if (!ok || !this.stream) { this.running = false; this.onError(lastErr || new Error('لا تظهر صورة من الكاميرا')); return; }
     this.track = this.stream.getVideoTracks()[0];
     try { this.caps = this.track.getCapabilities ? this.track.getCapabilities() : {}; } catch (e) { this.caps = {}; }
     await this.setContinuous();
