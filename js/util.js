@@ -62,6 +62,8 @@ const Codes = (() => {
     const t = String(s).trim();
     return !isBarcode(t) && !isItemNo(t) && /\p{L}/u.test(t) && (t.includes(' ') || t.length >= 8);
   };
+  /** نص يستحق البحث بالاسم: فيه حرف وليس باركوداً ولا رقم صنف (ولو كلمة قصيرة). */
+  const searchableAsName = (s) => { const t = String(s).trim(); return !isBarcode(t) && !isItemNo(t) && /\p{L}/u.test(t); };
   const tashkeel = /[ً-ٰٟـ]/g;
   const normTokens = (s) => {
     let t = String(s).toLowerCase().replace(tashkeel, '');
@@ -83,7 +85,7 @@ const Codes = (() => {
     }
     return [b, i];
   };
-  return { isBarcode, isItemNo, looksLikeName, normTokens, nameKey, fix, uniq };
+  return { isBarcode, isItemNo, looksLikeName, searchableAsName, normTokens, nameKey, fix, uniq };
 })();
 
 /** تنظيف كود مقروء من ملف: أرقام عربية، رموز خفية، علامة ' وبادئة، و .0 */

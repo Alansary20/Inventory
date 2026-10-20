@@ -9,7 +9,7 @@ const Names = (() => {
   let cache = null;
   function build(version) {
     const prods = Store.allProducts(), stock = Store.allStock();
-    const list = [], codes = new Set();
+    const list = [], codes = new Set(), nkByCode = new Map();
     const add = (name, itemNo, barcode, key) => {
       if (!String(name).trim()) return;
       list.push({ name, itemNo, barcode, key, tokens: new Set(Codes.normTokens(name)) });
@@ -19,9 +19,17 @@ const Names = (() => {
       if (p.itemNo) codes.add(p.itemNo);
       if (p.barcode) codes.add(p.barcode);
       altList(p.altBarcodes).forEach((a) => codes.add(a));
+      const nk = Codes.nameKey(p.name);
+      if (p.itemNo) nkByCode.set(p.itemNo, nk);
+      if (p.barcode) nkByCode.set(p.barcode, nk);
     }
     for (const s of stock) {
-      if (codes.has(s.key) || (s.itemNo && codes.has(s.itemNo)) || (s.barcode && codes.has(s.barcode))) continue;
+      if (codes.has(s.key) || (s.itemNo && codes.has(s.itemNo)) || (s.barcode && codes.has(s.barcode))) {
+        // له منتج: نضيف اسمه في الرصيد فقط إن اختلف عن اسم المنتج
+        const pk = nkByCode.get(s.key) ?? nkByCode.get(s.itemNo) ?? nkByCode.get(s.barcode);
+        if (pk !== undefined && pk !== Codes.nameKey(s.name)) add(s.name, s.itemNo, s.barcode, s.key);
+        continue;
+      }
       add(s.name, s.itemNo, s.barcode, s.key);
     }
     const byKey = new Map();
@@ -33,13 +41,29 @@ const Names = (() => {
     return {
       version,
       exact(q) { const l = byKey.get(Codes.nameKey(q)); return l && l.length === 1 ? l[0] : null; },
-      candidates(q, max = 8) {
-        const qt = new Set(Codes.normTokens(q));
-        if (!qt.size || (qt.size === 1 && [...qt][0].length < 3)) return [];
+      search(q, max = 8) {
+        const qt = [...new Set(Codes.normTokens(q))];
+        if (!qt.length || (qt.length === 1 && qt[0].length < 2)) return { list: [], full: true };
         const direct = byKey.get([...qt].sort().join(' '));
-        if (direct) return direct.slice(0, max);
-        return list.filter((h) => [...qt].every((t) => h.tokens.has(t))).sort((a, b) => a.tokens.size - b.tokens.size).slice(0, max);
+        if (direct) return { list: direct.slice(0, max), full: true };
+        const tokMatch = (w, t) => (t === w ? 3 : t.startsWith(w) ? 2 : (w.length >= 2 && t.includes(w)) ? 1 : 0);
+        const scored = [];
+        for (const h of list) {
+          let m = 0, sc = 0;
+          for (const w of qt) {
+            let best = 0;
+            for (const t of h.tokens) { const v = tokMatch(w, t); if (v > best) best = v; if (best === 3) break; }
+            if (best > 0) { m++; sc += best; }
+          }
+          if (m > 0) scored.push({ h, m, sc });
+        }
+        const full = scored.filter((x) => x.m === qt.length);
+        if (full.length) return { list: full.sort((a, b) => b.sc - a.sc || a.h.tokens.size - b.h.tokens.size).slice(0, max).map((x) => x.h), full: true };
+        const need = Math.max(1, Math.floor((qt.length + 1) / 2));
+        const part = scored.filter((x) => x.m >= need).sort((a, b) => b.m - a.m || b.sc - a.sc || a.h.tokens.size - b.h.tokens.size);
+        return { list: part.slice(0, max).map((x) => x.h), full: false };
       },
+      candidates(q, max = 8) { return this.search(q, max).list; },
     };
   }
   return {
@@ -146,15 +170,17 @@ const ScanEngine = (() => {
       Store.addToInventory(itemNo || barcode || st.key, name, barcode, itemNo);
       return { kind: 'AUTO', name, code };
     }
-    if (!Codes.isBarcode(code) && !Codes.isItemNo(code) && Codes.looksLikeName(code)) {
+    if (Codes.searchableAsName(code)) {
       const idx = Names.get();
       const ex = idx.exact(code);
       if (ex) return addHit(ex);
-      const c = idx.candidates(code);
-      if (c.length === 1) return addHit(c[0]);
-      if (c.length > 1) return { kind: 'CHOOSE', code, choices: c };
-      Store.addToInventory(code, code, '', '');
-      return { kind: 'NAME_ONLY', name: code, code };
+      const r = idx.search(code);
+      if (r.list.length === 1 && r.full) return addHit(r.list[0]);
+      if (r.list.length) return { kind: 'CHOOSE', code, choices: r.list };
+      if (Codes.looksLikeName(code)) {
+        Store.addToInventory(code, code, '', '');
+        return { kind: 'NAME_ONLY', name: code, code };
+      }
     }
     const uItem = isItemNo ? code : '', uBar = isBarcode ? code : '';
     Store.addToInventory(uItem || uBar || code, UNKNOWN_NAME, uBar, uItem);
