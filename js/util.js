@@ -145,6 +145,20 @@ function uuid() {
   });
 }
 
+/** الأطول بين الباركودات؛ عند التساوي الأول. */
+function longestCode(list) { let best = ''; for (const c of list) if (c.length > best.length) best = c; return best; }
+/** كل باركودات المنتج (الرئيسي أولاً) بلا تكرار. */
+function allBarcodes(p) { return [...new Set([String(p.barcode || '').trim(), ...String(p.altBarcodes || '').split(',').map((x) => x.trim())].filter((x) => x))]; }
+/** الباركود الرئيسي هو الأطول دائماً، والبقية إضافية بترتيبها. */
+function normalizeProduct(p) {
+  const all = allBarcodes(p);
+  if (!all.length) return p;
+  const main = longestCode(all), alts = all.filter((x) => x !== main).join(',');
+  return (main === p.barcode && alts === p.altBarcodes) ? p : { ...p, barcode: main, altBarcodes: alts };
+}
+/** خلية فيها عدة باركودات: نعيد الأطول (أو الخلية نفسها إن لم يكن فيها فاصل). */
+function pickLongestBarcode(cell) { const parts = splitCodes(cell); return parts.length <= 1 ? cell : longestCode(parts); }
+
 function altList(altBarcodes) {
   return String(altBarcodes || '').split(',').map((x) => x.trim()).filter((x) => x);
 }

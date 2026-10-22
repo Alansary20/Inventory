@@ -41,7 +41,7 @@ const Names = (() => {
     return {
       version,
       exact(q) { const l = byKey.get(Codes.nameKey(q)); return l && l.length === 1 ? l[0] : null; },
-      search(q, max = 8) {
+      search(q, max = 300) {
         const qt = [...new Set(Codes.normTokens(q))];
         if (!qt.length || (qt.length === 1 && qt[0].length < 2)) return { list: [], full: true };
         const direct = byKey.get([...qt].sort().join(' '));
@@ -63,7 +63,7 @@ const Names = (() => {
         const part = scored.filter((x) => x.m >= need).sort((a, b) => b.m - a.m || b.sc - a.sc || a.h.tokens.size - b.h.tokens.size);
         return { list: part.slice(0, max).map((x) => x.h), full: false };
       },
-      candidates(q, max = 8) { return this.search(q, max).list; },
+      candidates(q, max = 300) { return this.search(q, max).list; },
     };
   }
   return {
@@ -203,6 +203,7 @@ function buildCompare() {
   const canonical = (k) => {
     const p = prodsMap.get(k);
     if (p && p.itemNo) return p.itemNo;
+    if (p && p.barcode) return p.barcode;   // أي باركود للمنتج يرجع لرئيسيه
     if (!p && !Codes.isBarcode(k) && !Codes.isItemNo(k) && Codes.looksLikeName(k)) {
       const h = names.exact(k);
       if (h && h.itemNo) return h.itemNo;
@@ -346,10 +347,10 @@ const ProductImporter = {
         for (let ri = start; ri < end; ri++) {
           const row = rows[ri];
           const bParts = splitCodes(cell(row, map.barcode)).map(cleanCode).filter((x) => x);
-          const [barcode, itemNo] = Codes.fix(bParts[0] || '', cleanCode(cell(row, map.itemNo)));
+          const [barcode, itemNo] = Codes.fix(longestCode(bParts), cleanCode(cell(row, map.itemNo)));   // الرئيسي هو الأطول
           const allB = new Set();
           if (barcode) allB.add(barcode);
-          for (let k = 1; k < bParts.length; k++) if (bParts[k] && bParts[k] !== itemNo) allB.add(bParts[k]);
+          for (const b of bParts) if (b && b !== itemNo) allB.add(b);
           const name = cell(row, map.name).trim();
           const origN = map.priceOrig >= 0 ? parseNumber(cell(row, map.priceOrig)) : null;
           const saleN = map.priceSale >= 0 ? parseNumber(cell(row, map.priceSale)) : null;
@@ -378,6 +379,9 @@ const ProductImporter = {
               if (b === main) continue;
               if (!main) main = b; else if (!alts.includes(b)) alts.push(b);
             }
+            // الرئيسي هو الأطول بين كل الباركودات (القديمة والجديدة)
+            const pool = [...new Set([main, ...alts].filter((x) => x))];
+            if (pool.length) { main = longestCode(pool); alts.length = 0; alts.push(...pool.filter((x) => x !== main)); }
             const hasOrig = map.priceOrig >= 0 && origN != null, hasSale = map.priceSale >= 0 && saleN != null;
             const p = { ...existing, barcode: main, altBarcodes: alts.join(','), itemNo: itemNo || existing.itemNo, name: name || existing.name,
               priceOrig: hasOrig ? priceOrig : existing.priceOrig, priceSale: (hasSale || hasOrig) ? priceSale : existing.priceSale };
@@ -411,7 +415,7 @@ const ProductImporter = {
       if (g.length < 2) continue;
       const keeper = g[0], codes = new Set();
       for (const p of g) { if (p.barcode) codes.add(p.barcode); altList(p.altBarcodes).forEach((a) => codes.add(a)); }
-      const main = keeper.barcode || [...codes][0] || '';
+      const main = longestCode([...codes]);
       codes.delete(main);
       ups.push({ ...keeper, barcode: main, altBarcodes: [...codes].join(','),
         name: (g.map((p) => p.name).find((n) => n.trim())) || keeper.name,
@@ -440,7 +444,7 @@ async function importStock(sources, cols, noHeader, merge, progress) {
       const batch = new Map();
       for (let ri = start; ri < end; ri++) {
         const r = rows[ri];
-        const [barcode, itemNo] = Codes.fix(cellOf(r, cols[1]), cellOf(r, cols[0]));
+        const [barcode, itemNo] = Codes.fix(pickLongestBarcode(cellOf(r, cols[1])), cellOf(r, cols[0]));
         const key = itemNo || barcode;
         if (!key) continue;
         const name = cellOf(r, cols[2]);
@@ -469,7 +473,7 @@ function importInventoryRows(src, cols, noHeader, merge) {
   const rows = noHeader ? src.rows : src.rows.slice(1);
   const now = Date.now(), parsed = [];
   for (const r of rows) {
-    const [bc, inNo] = Codes.fix(cellOf(r, cols[0]), cellOf(r, cols[1]));
+    const [bc, inNo] = Codes.fix(pickLongestBarcode(cellOf(r, cols[0])), cellOf(r, cols[1]));
     const qn = parseNumber(cellOf(r, cols[3]));
     const qty = qn == null ? 0 : Math.trunc(qn);
     if ((!bc && !inNo) || qty <= 0) continue;

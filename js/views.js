@@ -320,7 +320,7 @@ Views.products = (app) => {
   function doExport() {
     const all = Store.allProducts().sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
     downloadXlsx(`منتجات_${dateStr()}.xlsx`, 'المنتجات', ['الباركود', 'رقم الصنف', 'الاسم', 'السعر الأساسي', 'السعر بعد الخصم'],
-      all.map((p) => [p.barcode, p.itemNo, p.name, p.priceOrig, p.priceSale !== 0 ? p.priceSale : p.priceOrig]), [22, 18, 40, 16, 16]);
+      all.map((p) => [allBarcodes(p).join(', '), p.itemNo, p.name, p.priceOrig, p.priceSale !== 0 ? p.priceSale : p.priceOrig]), [22, 18, 40, 16, 16]);
     toast(`تم تصدير ${all.length} منتج`);
   }
   function editProduct(p) {

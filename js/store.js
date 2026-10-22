@@ -88,7 +88,7 @@ const Store = (() => {
 
   // ───── تحويل الصفوف ─────
   const P_COLS = 'id, barcode, item_no, name, alt_barcodes, price_orig, price_sale, source_id';
-  const toProduct = (r) => ({ id: r.id, barcode: r.barcode, itemNo: r.item_no, name: r.name, altBarcodes: r.alt_barcodes, priceOrig: r.price_orig, priceSale: r.price_sale, sourceId: r.source_id });
+  const toProduct = (r) => normalizeProduct({ id: r.id, barcode: r.barcode, itemNo: r.item_no, name: r.name, altBarcodes: r.alt_barcodes, priceOrig: r.price_orig, priceSale: r.price_sale, sourceId: r.source_id });
   const toInv = (r) => ({ key: r.key, name: r.name, qty: r.qty, barcode: r.barcode, itemNo: r.item_no, timestamp: r.timestamp });
   const toLog = (r) => ({ id: r.id, itemCode: r.item_code, name: r.name, barcode: r.barcode, qty: r.qty, timestamp: r.timestamp });
   const toStock = (r) => ({ key: r.key, itemNo: r.item_no, barcode: r.barcode, name: r.name, qty: r.qty });
@@ -110,7 +110,7 @@ const Store = (() => {
     if (!list.length) return;
     tx(() => {
       const st = db.prepare(`INSERT OR REPLACE INTO products (${P_COLS}) VALUES (?,?,?,?,?,?,?,?)`);
-      try { for (const p of list) st.run([p.id, p.barcode, p.itemNo, p.name, p.altBarcodes, p.priceOrig, p.priceSale, p.sourceId || 0]); } finally { st.free(); }
+      try { for (const p0 of list) { const p = normalizeProduct(p0); st.run([p.id, p.barcode, p.itemNo, p.name, p.altBarcodes, p.priceOrig, p.priceSale, p.sourceId || 0]); } } finally { st.free(); }
     });
   }
   function deleteProducts(ids) {
