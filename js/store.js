@@ -5,6 +5,9 @@ const Store = (() => {
   let SQL = null, db = null, saveTimer = null, saving = false, dirty = false;
   const IDB_NAME = 'jard-makhzon', IDB_STORE = 'kv', IDB_KEY = 'sqlite';
   const state = { dataVersion: 0 };
+  const DEFAULT_BRANCH = 'الفرع الرئيسي';
+  const getBranch = () => { try { return localStorage.getItem('jard_branch') || DEFAULT_BRANCH; } catch (e) { return DEFAULT_BRANCH; } };
+  const setBranch = (v) => { try { localStorage.setItem('jard_branch', v); } catch (e) {} bump(); };
 
   // ───── IndexedDB ─────
   const idbOpen = () => new Promise((res, rej) => {
@@ -34,7 +37,7 @@ const Store = (() => {
     "CREATE INDEX IF NOT EXISTS idx_products_barcode ON products(barcode)",
     "CREATE INDEX IF NOT EXISTS idx_products_item_no ON products(item_no)",
     "CREATE TABLE IF NOT EXISTS inventory (key TEXT PRIMARY KEY, name TEXT NOT NULL DEFAULT '', qty INTEGER NOT NULL DEFAULT 0, barcode TEXT NOT NULL DEFAULT '', item_no TEXT NOT NULL DEFAULT '', timestamp INTEGER NOT NULL DEFAULT 0)",
-    "CREATE TABLE IF NOT EXISTS stock (key TEXT PRIMARY KEY, item_no TEXT NOT NULL DEFAULT '', barcode TEXT NOT NULL DEFAULT '', name TEXT NOT NULL DEFAULT '', qty REAL NOT NULL DEFAULT 0)",
+    "CREATE TABLE IF NOT EXISTS stock (branch TEXT NOT NULL DEFAULT '', key TEXT NOT NULL, item_no TEXT NOT NULL DEFAULT '', barcode TEXT NOT NULL DEFAULT '', name TEXT NOT NULL DEFAULT '', qty REAL NOT NULL DEFAULT 0, PRIMARY KEY (branch, key))",
     "CREATE INDEX IF NOT EXISTS idx_stock_item_no ON stock(item_no)",
     "CREATE INDEX IF NOT EXISTS idx_stock_barcode ON stock(barcode)",
     "CREATE TABLE IF NOT EXISTS uploaded_files (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, kind TEXT NOT NULL, timestamp INTEGER NOT NULL)",
@@ -42,11 +45,24 @@ const Store = (() => {
     "CREATE INDEX IF NOT EXISTS idx_scan_log_time ON scan_log(timestamp)",
   ];
 
+  // ترقية جدول الرصيد القديم (بدون فروع): ننقل كل شيء إلى الفرع الرئيسي
+  function migrateStock() {
+    let cols = [];
+    try { cols = all('PRAGMA table_info(stock)').map((r) => r.name); } catch (e) { return; }
+    if (!cols.length || cols.includes('branch')) return;
+    db.run('ALTER TABLE stock RENAME TO stock_old');
+    db.run('DROP INDEX IF EXISTS idx_stock_item_no'); db.run('DROP INDEX IF EXISTS idx_stock_barcode');
+    db.run("CREATE TABLE stock (branch TEXT NOT NULL DEFAULT '', key TEXT NOT NULL, item_no TEXT NOT NULL DEFAULT '', barcode TEXT NOT NULL DEFAULT '', name TEXT NOT NULL DEFAULT '', qty REAL NOT NULL DEFAULT 0, PRIMARY KEY (branch, key))");
+    db.run('INSERT OR REPLACE INTO stock (branch, key, item_no, barcode, name, qty) SELECT ?, key, item_no, barcode, name, qty FROM stock_old', [DEFAULT_BRANCH]);
+    db.run('DROP TABLE stock_old');
+  }
+
   async function init() {
     SQL = await initSqlJs({ locateFile: (f) => 'vendor/' + f });
     let bytes = null;
     try { bytes = await idbGet(); } catch (e) { /* قد يكون التخزين محجوباً */ }
     db = bytes ? new SQL.Database(new Uint8Array(bytes)) : new SQL.Database();
+    migrateStock();
     for (const s of SCHEMA) db.run(s);
     try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (e) {}
     const flush = () => { if (dirty) saveNow(); };
@@ -91,7 +107,7 @@ const Store = (() => {
   const toProduct = (r) => normalizeProduct({ id: r.id, barcode: r.barcode, itemNo: r.item_no, name: r.name, altBarcodes: r.alt_barcodes, priceOrig: r.price_orig, priceSale: r.price_sale, sourceId: r.source_id });
   const toInv = (r) => ({ key: r.key, name: r.name, qty: r.qty, barcode: r.barcode, itemNo: r.item_no, timestamp: r.timestamp });
   const toLog = (r) => ({ id: r.id, itemCode: r.item_code, name: r.name, barcode: r.barcode, qty: r.qty, timestamp: r.timestamp });
-  const toStock = (r) => ({ key: r.key, itemNo: r.item_no, barcode: r.barcode, name: r.name, qty: r.qty });
+  const toStock = (r) => ({ branch: r.branch, key: r.key, itemNo: r.item_no, barcode: r.barcode, name: r.name, qty: r.qty });
 
   // ───── المنتجات ─────
   const searchProducts = (q, limit, offset) => (q
@@ -103,7 +119,7 @@ const Store = (() => {
   const countProducts = () => scalar('SELECT COUNT(*) FROM products');
   const countInventory = () => scalar('SELECT COUNT(*) FROM inventory');
   const countScanLog = () => scalar('SELECT COUNT(*) FROM scan_log');
-  const countStock = () => scalar('SELECT COUNT(*) FROM stock');
+  const countStock = (branch) => (branch == null ? scalar('SELECT COUNT(*) FROM stock') : scalar('SELECT COUNT(*) FROM stock WHERE branch = ?', [branch]));
 
   function upsertProducts(list) {
     bump();
@@ -137,7 +153,7 @@ const Store = (() => {
     return r && toProduct(r);
   }
   const findByItemNo = (code) => { const r = one(`SELECT ${P_COLS} FROM products WHERE item_no = ? LIMIT 1`, [code]); return r && toProduct(r); };
-  const findStock = (code) => { const r = one('SELECT key, item_no, barcode, name, qty FROM stock WHERE key = ? OR item_no = ? OR barcode = ? LIMIT 1', [code, code, code]); return r && toStock(r); };
+  const findStock = (code) => { const r = one('SELECT branch, key, item_no, barcode, name, qty FROM stock WHERE key = ? OR item_no = ? OR barcode = ? LIMIT 1', [code, code, code]); return r && toStock(r); };
 
   // ───── الجرد وسجل المسحات ─────
   const INV_COLS = 'key, name, qty, barcode, item_no, timestamp';
@@ -225,21 +241,27 @@ const Store = (() => {
     });
   }
 
-  // ───── الرصيد ─────
-  const searchStock = (q, limit, offset) => (q
-    ? all(`SELECT key, item_no, barcode, name, qty FROM stock WHERE name GLOB ? OR key LIKE ? ESCAPE '\\' OR barcode LIKE ? ESCAPE '\\' ORDER BY name COLLATE NOCASE LIMIT ? OFFSET ?`,
-        [Ar.glob(q), Ar.like(q), Ar.like(q), limit, offset])
-    : all('SELECT key, item_no, barcode, name, qty FROM stock ORDER BY name COLLATE NOCASE LIMIT ? OFFSET ?', [limit, offset])).map(toStock);
-  const allStock = () => all('SELECT key, item_no, barcode, name, qty FROM stock').map(toStock);
+  // ───── الرصيد (لكل فرع) ─────
+  const S_COLS = 'branch, key, item_no, barcode, name, qty';
+  const searchStock = (branch, q, limit, offset) => (q
+    ? all(`SELECT ${S_COLS} FROM stock WHERE branch = ? AND (name GLOB ? OR key LIKE ? ESCAPE '\\' OR barcode LIKE ? ESCAPE '\\') ORDER BY name COLLATE NOCASE LIMIT ? OFFSET ?`,
+        [branch, Ar.glob(q), Ar.like(q), Ar.like(q), limit, offset])
+    : all(`SELECT ${S_COLS} FROM stock WHERE branch = ? ORDER BY name COLLATE NOCASE LIMIT ? OFFSET ?`, [branch, limit, offset])).map(toStock);
+  const allStock = (branch) => (branch == null
+    ? all(`SELECT ${S_COLS} FROM stock`)
+    : all(`SELECT ${S_COLS} FROM stock WHERE branch = ?`, [branch])).map(toStock);
+  const branches = () => all('SELECT branch, COUNT(*) AS n FROM stock GROUP BY branch ORDER BY branch COLLATE NOCASE').map((r) => [r.branch, r.n]);
   function upsertStock(list) {
     bump();
     if (!list.length) return;
     tx(() => {
-      const st = db.prepare('INSERT OR REPLACE INTO stock (key, item_no, barcode, name, qty) VALUES (?,?,?,?,?)');
-      try { for (const r of list) st.run([r.key, r.itemNo, r.barcode, r.name, r.qty]); } finally { st.free(); }
+      const st = db.prepare('INSERT OR REPLACE INTO stock (branch, key, item_no, barcode, name, qty) VALUES (?,?,?,?,?,?)');
+      try { for (const r of list) st.run([r.branch || DEFAULT_BRANCH, r.key, r.itemNo, r.barcode, r.name, r.qty]); } finally { st.free(); }
     });
   }
   const clearStock = () => { bump(); tx(() => { db.run('DELETE FROM stock'); db.run("DELETE FROM uploaded_files WHERE kind = 'stock'"); }); };
+  const clearStockBranches = (names) => { bump(); if (!names.length) return; tx(() => { const st = db.prepare('DELETE FROM stock WHERE branch = ?'); try { for (const n of names) st.run([n]); } finally { st.free(); } }); };
+  const deleteBranch = (name) => clearStockBranches([name]);
 
   // ───── التنظيف بعد الاستيراد ─────
   function purgeZeroInventory() {
@@ -304,6 +326,7 @@ const Store = (() => {
     const nd = new SQL.Database(new Uint8Array(bytes));
     for (const t of ['products', 'inventory', 'stock', 'scan_log']) nd.exec(`SELECT COUNT(*) FROM ${t}`); // تحقق أنه ملف صالح
     db.close(); db = nd;
+    migrateStock();
     for (const s of SCHEMA) db.run(s);
     bump(); markDirty(); await saveNow();
   }
@@ -319,7 +342,8 @@ const Store = (() => {
     upsertProducts, deleteProducts, deleteProduct, clearProducts, addUploadedFile,
     addToInventory, searchInventory, allInventory, searchLog, logPlus, logMinus, logDelete, logSetQty,
     clearInventoryAndLog, importInventory,
-    searchStock, allStock, upsertStock, clearStock,
+    searchStock, allStock, upsertStock, clearStock, clearStockBranches, deleteBranch, branches,
+    DEFAULT_BRANCH, getBranch, setBranch,
     purgeZeroInventory, repairNameKeys, resolveUnknown, reconcile,
     exportDb, importDb, wipeAll,
   };

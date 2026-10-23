@@ -192,13 +192,16 @@ Views.stock = (app) => {
   const root = h('div', { class: 'view' });
   let files = [], query = '', list = null;
   const fileBtn = h('button', { class: 'btn', onclick: async () => { const f = await pickFiles(true); if (f.length) { files = f; fileBtn.textContent = `تم اختيار ${f.length} ملف`; } } }, 'اختر ملف Excel');
-  const mode = modeChips(false, 'تحديث: يحذف بيانات الرصيد القديمة ويستبدلها بالجديدة.', 'دمج: يجمع الكميات مع الرصيد الحالي.');
+  const mode = modeChips(false, 'تحديث: يحذف الرصيد القديم للفروع الموجودة في الملف ويستبدله بالجديد (وباقي الفروع كما هي).', 'دمج: يجمع الكميات مع رصيد كل فرع.');
   const count = h('div', { class: 'count' }), holder = h('div');
+  const brLbl = h('b', { class: 'grow ell' }, '');
+  const brBar = h('div', { class: 'irow', style: 'margin-bottom:10px;align-items:center' }, brLbl,
+    h('button', { class: 'btn', style: 'min-height:38px;padding:0 14px;width:auto;flex:none', onclick: () => branchDialog(() => { refresh(); app.changed(); }) }, 'تغيير'));
   async function doImport() {
     if (!files.length) { toast('اختر ملفاً أولاً'); return; }
     try {
       const srcs = await readFiles(files); if (!srcs) return;
-      const fields = [{ label: 'رقم الصنف', kind: 'ITEM_NO' }, { label: 'الباركود', kind: 'BARCODE' }, { label: 'اسم المنتج', kind: 'NAME' }, { label: 'الكمية', kind: 'QTY', required: true }];
+      const fields = [{ label: 'رقم الصنف', kind: 'ITEM_NO' }, { label: 'الباركود', kind: 'BARCODE' }, { label: 'اسم المنتج', kind: 'NAME' }, { label: 'الكمية', kind: 'QTY', required: true }, { label: 'الفرع (اختياري)', kind: 'BRANCH' }];
       const m = await mapColumns(files.map((f) => f.name).join(', '), srcs[0].rows.slice(0, 30), fields); if (!m) return;
       if (m.cols[0] < 0 && m.cols[1] < 0) { toast('اختر عمود الباركود أو رقم الصنف على الأقل'); return; }
       if (m.cols[3] < 0) { toast('اختر عمود الكمية'); return; }
@@ -206,25 +209,27 @@ Views.stock = (app) => {
       let n;
       try { n = await importStock(srcs, m.cols, m.noHeader, mode.merge, (f, l) => pd.set(f, l)); } finally { pd.close(); }
       files = []; fileBtn.textContent = 'اختر ملف Excel';
-      toast(`تم تحديث الرصيد (${n} صنف)`); refresh(); app.changed();
+      toast(`تم تحديث الرصيد (${n.records} سجل، ${n.branches} فرع)`); refresh(); app.changed();
     } catch (e) { toast('تعذّرت قراءة الملف: ' + e.message); }
   }
   function doExport() {
-    const all = Store.allStock().sort((a, b) => (a.key < b.key ? -1 : 1));
-    downloadXlsx(`رصيد_${dateStr()}.xlsx`, 'الرصيد', ['رقم الصنف', 'الاسم', 'كمية الرصيد'], all.map((s) => [s.key, s.name, s.qty]), [18, 36, 16]);
+    const all = Store.allStock().sort((a, b) => (a.branch < b.branch ? -1 : a.branch > b.branch ? 1 : a.key < b.key ? -1 : 1));
+    downloadXlsx(`رصيد_${dateStr()}.xlsx`, 'الرصيد', ['رقم الصنف', 'الاسم', 'كمية الرصيد', 'الفرع'], all.map((s) => [s.key, s.name, s.qty, s.branch]), [18, 36, 16, 20]);
     toast(`تم تصدير ${all.length} منتج`);
   }
   const renderRow = (r) => h('div', { class: 'irow' },
     h('div', { class: 'grow' }, h('b', { class: 'ell nm' }, r.name || '—'), h('div', { class: 's10' }, r.key)),
     h('div', { class: 'qbadge ' + qtyClass(r.qty) }, fmtQty(r.qty)));
   function refresh() {
-    count.textContent = `الرصيد (${Store.countStock()})`;
-    if (!list) list = pagedList(holder, (l, o) => Store.searchStock(query, l, o), renderRow, 'لا توجد بيانات رصيد');
+    brLbl.textContent = '🏬 الفرع: ' + Store.getBranch();
+    count.textContent = `الرصيد (${Store.countStock(Store.getBranch())})`;
+    if (!list) list = pagedList(holder, (l, o) => Store.searchStock(Store.getBranch(), query, l, o), renderRow, 'لا توجد بيانات رصيد');
     list.reload();
   }
   root.append(h('div', { class: 'vh' },
     importCard('رفع ملف رصيد النظام', fileBtn, mode, 'معالجة ورفع الرصيد', doImport),
     h('button', { class: 'btn mb10', onclick: doExport }, 'تصدير الرصيد'),
+    brBar,
     searchBox((v) => { query = v; refresh(); }), count), holder);
   refresh();
   return { el: root, refresh };
@@ -243,6 +248,9 @@ Views.compare = (app) => {
   const paintFilters = () => fbar.replaceChildren(...FLT.map(([k, cls, ic, l]) => h('button', { class: `fb ${cls}` + (filter === k ? ' on' : ''), onclick: () => { filter = k; limit = 60; paintFilters(); apply(); } },
     h('div', { class: 'ib' }, ico(ic)), h('div', { class: 'lb' }, l))));
   const holder = h('div'), emptyEl = h('div', { class: 'empty', style: 'display:none' }, 'لا توجد بيانات للمقارنة');
+  const cmpBr = h('b', { class: 'grow ell' }, '');
+  const cmpBar = h('div', { class: 'irow', style: 'margin-bottom:10px;align-items:center' }, cmpBr,
+    h('button', { class: 'btn', style: 'min-height:38px;padding:0 14px;width:auto;flex:none', onclick: () => branchDialog(() => { refresh(); app.changed(); }) }, 'تغيير'));
   const more = h('button', { class: 'btn more', onclick: () => { limit += 60; paint(); } }, 'عرض المزيد');
   function apply() {
     if (!data) return;
@@ -272,7 +280,7 @@ Views.compare = (app) => {
     }));
     more.style.display = shown.length > limit ? '' : 'none';
   }
-  function refresh() { data = buildCompare(); limit = 60; apply(); }
+  function refresh() { cmpBr.textContent = '🏬 المقارنة مع رصيد فرع: ' + Store.getBranch(); data = buildCompare(); limit = 60; apply(); }
   function doExport() {
     const lst = data ? data.rows : buildCompare().rows;
     const kindOf = (r) => r.diff > 0 ? 'inc' : r.diff < 0 ? 'dec' : (r.qi > 0 ? 'match' : 'none');
@@ -284,6 +292,7 @@ Views.compare = (app) => {
     toast(`تم تصدير ${rows.length} منتج`);
   }
   root.append(h('div', { class: 'vh' },
+    cmpBar,
     h('div', { class: 'cgrid' }, sRef.el, sInc.el, sDec.el), h('div', { class: 'cgrid' }, sMatch.el, sScan.el, sDiff.el),
     fbar,
     h('button', { class: 'btn mb10', onclick: doExport }, 'تصدير المقارنة'),
@@ -420,7 +429,9 @@ Views.prices = (app) => {
       h('div', { class: 'pname' }, r.name || '—'),
       (r.itemNo || r.barcodes.length) ? h('div', { class: 'codes' }, r.itemNo ? codeRow('🔢 رقم الصنف', r.itemNo, false) : null, r.barcodes.map((b) => codeRow('📦 الباركود', b, true))) : null,
       h('div', { class: 'tiles' }, tile('السعر الأساسي', r.orig ? fmtQty(r.orig) : '—', 'orig'), tile('السعر بعد الخصم', r.sale ? fmtQty(r.sale) : '—', 'sale'),
-        tile('الخصم', r.disc + '%', 'disc'), tile('الرصيد', fmtQty(r.stock), 'stk ' + stockCls(r.stock))));
+        tile('الخصم', r.disc + '%', 'disc'), tile(r.branches.length > 1 ? 'إجمالي الرصيد' : 'الرصيد', fmtQty(r.stock), 'stk ' + stockCls(r.stock))),
+      r.branches.length > 1 ? h('div', { class: 'codes', style: 'margin-top:10px' }, h('div', { class: 'fld-l', style: 'font-weight:700;margin-bottom:6px' }, '🏬 الرصيد بالفروع'),
+        r.branches.map(([b, q]) => h('div', { class: 'coderow', style: b === Store.getBranch() ? 'color:var(--accent);font-weight:700' : '' }, h('span', { class: 'l' }, b), h('b', { class: q === 0 ? 'stk zero' : '' }, fmtQty(q))))) : null);
   }
   const productRow = (r) => {
     const shownPrice = r.sale || r.orig, both = r.orig && r.sale && r.orig !== r.sale;

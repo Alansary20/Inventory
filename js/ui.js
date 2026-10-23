@@ -75,6 +75,43 @@ const confirmDlg = (title, message, okLabel, danger = true) => new Promise((res)
   buttons: [{ label: okLabel, kind: danger ? 'danger' : 'primary', onclick: () => res(true) }, { label: 'إلغاء', onclick: () => res(false) }],
   cancelable: true,
 }));
+// ───── اختيار الفرع ─────
+function branchDialog(onChanged) {
+  const list = h('div'), cur = () => Store.getBranch();
+  let d = null;
+  const paint = () => {
+    const bs = Store.branches();
+    if (!bs.some((b) => b[0] === cur())) bs.unshift([cur(), 0]);
+    list.replaceChildren(...bs.map(([name, n]) => {
+      const on = name === cur();
+      let timer = null;
+      const del = async () => {
+        if (!await confirmDlg('حذف رصيد الفرع', `حذف كل رصيد «${name}» (${n} صنف)؟`, 'حذف')) return;
+        Store.deleteBranch(name);
+        if (on) Store.setBranch(Store.branches().length ? Store.branches()[0][0] : Store.DEFAULT_BRANCH);
+        toast('تم حذف رصيد الفرع'); paint(); onChanged && onChanged();
+      };
+      return h('div', { class: 'irow', style: 'cursor:pointer;margin-bottom:6px' + (on ? ';border-color:var(--accent)' : ''),
+        onclick: () => { Store.setBranch(name); d.close(); onChanged && onChanged(); },
+        oncontextmenu: (e) => { e.preventDefault(); del(); },
+        ontouchstart: () => { timer = setTimeout(() => { timer = null; del(); }, 700); },
+        ontouchend: () => clearTimeout(timer), ontouchmove: () => clearTimeout(timer) },
+        h('div', { class: 'grow' }, h('b', { class: 'ell nm', style: on ? 'color:var(--accent)' : '' }, (on ? '✓ ' : '') + name), h('div', { class: 's10' }, `${n} صنف`)),
+        h('button', { class: 'btn danger', style: 'min-height:34px;padding:0 10px;width:auto;flex:none', onclick: (e) => { e.stopPropagation(); del(); } }, '🗑'));
+    }));
+  };
+  paint();
+  const addNew = () => {
+    const inp = h('input', { type: 'text', class: 'inp', placeholder: 'اسم الفرع' });
+    dialog({ title: 'فرع جديد', icon: 'edit', content: inp, buttons: [
+      { label: 'إضافة', kind: 'primary', onclick: () => { const v = inp.value.trim(); if (v) { Store.setBranch(v); d.close(); onChanged && onChanged(); } } },
+      { label: 'إلغاء' }] });
+    setTimeout(() => inp.focus(), 50);
+  };
+  d = dialog({ title: 'الفروع', icon: 'products', subtitle: 'اضغط فرعاً لاختياره (ضغطة مطوّلة أو 🗑 للحذف). الجرد والمقارنة يعملان على الفرع المختار.', content: list, scroll: true,
+    buttons: [{ label: 'فرع جديد', kind: 'primary', keep: true, onclick: () => addNew() }, { label: 'إغلاق' }] });
+  return d;
+}
 // تعديل الكمية: + على جهة البداية و − على النهاية كما في التطبيق
 const promptQty = (title, current, name) => new Promise((res) => {
   const inp = h('input', { type: 'number', inputmode: 'numeric', value: current, min: 0, class: 'inp' });
