@@ -99,7 +99,7 @@ const PricesIndex = (() => {
       if (!nameMap.has(s.key)) nameMap.set(s.key, s.name || s.key);
     }
     const sumOf = (m) => { let t = 0; for (const v of m.values()) t += v; return t; };
-    const brList = (m) => allBranches.map((b) => [b, (m && m.get(b)) || 0]);
+    const brList = (m) => allBranches.map((b) => [b, (m && m.get(b)) || 0]).sort((x, y) => y[1] - x[1]);  // الأعلى رصيداً أولاً
     const items = [], byCode = new Map(), byBarcode = new Map(), matched = new Set();
     const mk = (o) => Object.assign(o, { lcName: Ar.norm(o.name), lcCode: o.code.toLowerCase(), lcItem: o.itemNo.toLowerCase(), lcBar: o.barcode.toLowerCase() });
     for (const p of prods) {
