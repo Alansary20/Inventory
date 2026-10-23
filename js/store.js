@@ -73,7 +73,7 @@ const Store = (() => {
   function markDirty() {
     dirty = true;
     clearTimeout(saveTimer);
-    saveTimer = setTimeout(saveNow, 700);
+    saveTimer = setTimeout(saveNow, 2500);
   }
   async function saveNow() {
     if (saving || !db) { if (dirty) { clearTimeout(saveTimer); saveTimer = setTimeout(saveNow, 700); } return; }
@@ -114,7 +114,8 @@ const Store = (() => {
     ? all(`SELECT ${P_COLS} FROM products WHERE name GLOB ? OR barcode LIKE ? ESCAPE '\\' OR item_no LIKE ? ESCAPE '\\' OR alt_barcodes LIKE ? ESCAPE '\\' ORDER BY name COLLATE NOCASE LIMIT ? OFFSET ?`,
         [Ar.glob(q), Ar.like(q), Ar.like(q), Ar.like(q), limit, offset])
     : all(`SELECT ${P_COLS} FROM products ORDER BY name COLLATE NOCASE LIMIT ? OFFSET ?`, [limit, offset])).map(toProduct);
-  const allProducts = () => all(`SELECT ${P_COLS} FROM products`).map(toProduct);
+  let apCache = null, apVer = -1;   // نخزّن القائمة الكاملة حتى تتغير البيانات (يسرّع المقارنة والأسعار)
+  const allProducts = () => { if (apVer !== state.dataVersion || !apCache) { apCache = all(`SELECT ${P_COLS} FROM products`).map(toProduct); apVer = state.dataVersion; } return apCache; };
   const findByCode = (v) => { const r = one(`SELECT ${P_COLS} FROM products WHERE item_no = ? OR barcode = ? OR instr(',' || alt_barcodes || ',', ?) > 0 LIMIT 1`, [v, v, ',' + v + ',']); return r && toProduct(r); };
   const countProducts = () => scalar('SELECT COUNT(*) FROM products');
   const countInventory = () => scalar('SELECT COUNT(*) FROM inventory');
@@ -247,9 +248,9 @@ const Store = (() => {
     ? all(`SELECT ${S_COLS} FROM stock WHERE branch = ? AND (name GLOB ? OR key LIKE ? ESCAPE '\\' OR barcode LIKE ? ESCAPE '\\') ORDER BY name COLLATE NOCASE LIMIT ? OFFSET ?`,
         [branch, Ar.glob(q), Ar.like(q), Ar.like(q), limit, offset])
     : all(`SELECT ${S_COLS} FROM stock WHERE branch = ? ORDER BY name COLLATE NOCASE LIMIT ? OFFSET ?`, [branch, limit, offset])).map(toStock);
-  const allStock = (branch) => (branch == null
-    ? all(`SELECT ${S_COLS} FROM stock`)
-    : all(`SELECT ${S_COLS} FROM stock WHERE branch = ?`, [branch])).map(toStock);
+  let asCache = null, asVer = -1;
+  const allStockRaw = () => { if (asVer !== state.dataVersion || !asCache) { asCache = all(`SELECT ${S_COLS} FROM stock`).map(toStock); asVer = state.dataVersion; } return asCache; };
+  const allStock = (branch) => (branch == null ? allStockRaw() : allStockRaw().filter((s) => s.branch === branch));
   const branches = () => all('SELECT branch, COUNT(*) AS n FROM stock GROUP BY branch ORDER BY branch COLLATE NOCASE').map((r) => [r.branch, r.n]);
   function upsertStock(list) {
     bump();

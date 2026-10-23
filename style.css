@@ -237,3 +237,8 @@ input[type=search]::-webkit-search-cancel-button { display: none; }
 /* إخفاء أشرطة التمرير الجانبية */
 * { scrollbar-width: none; -ms-overflow-style: none; }
 *::-webkit-scrollbar { display: none; width: 0; height: 0; }
+
+.dlg-btns.stack { flex-direction: column; }
+.dlg-btns.stack .btn { flex: none; width: 100%; }
+.btn .bic { width: 20px; height: 20px; margin-inline-end: 8px; flex: none; display: inline-flex; }
+.btn .bic svg { width: 100%; height: 100%; display: block; }

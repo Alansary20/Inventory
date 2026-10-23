@@ -30,6 +30,7 @@ const ICONS = {
   edit: 'M3,17.25V21h3.75L17.81,9.94l-3.75,-3.75L3,17.25zM20.71,7.04c0.39,-0.39 0.39,-1.02 0,-1.41l-2.34,-2.34c-0.39,-0.39 -1.02,-0.39 -1.41,0l-1.83,1.83 3.75,3.75 1.83,-1.83z',
   trash: 'M6,19c0,1.1 0.9,2 2,2h8c1.1,0 2,-0.9 2,-2V7H6v12zM19,4h-3.5l-1,-1h-5l-1,1H5v2h14V4z',
   upload: 'M9,16h6v-6h4l-7,-7 -7,7h4zM5,18h14v2H5z',
+  download: 'M5,20h14v-2H5v2zM19,9h-4V3H9v6H5l7,7 7,-7z',
 };
 const ICONS_STROKE = {
   all: ['M4.5,4.5h15v15h-15z M12,4.5v15 M4.5,12h15', 2.4],
@@ -55,17 +56,17 @@ function toast(msg, ms = 3200) {
 }
 
 // ───── نافذة البطاقة (CardDialog) ─────
-function dialog({ title, icon, danger, subtitle, message, content, buttons = [], cancelable = true, scroll = false }) {
+function dialog({ title, icon, danger, subtitle, message, content, buttons = [], cancelable = true, scroll = false, stack = false }) {
   const close = () => { back.remove(); };
   const box = h('div', { class: 'dlg', role: 'dialog' },
     title ? h('div', { class: 'dlg-head' }, icon ? h('div', { class: 'dlg-ic' + (danger ? ' danger' : '') }, ico(icon)) : null, h('div', { class: 'dlg-title' }, title)) : null,
     subtitle ? h('div', { class: 'dlg-sub' }, subtitle) : null,
     message ? h('div', { class: 'dlg-msg', style: title ? '' : 'margin-top:0' }, message) : null,
     content ? h('div', { class: 'dlg-body' }, content) : null,
-    buttons.length ? h('div', { class: 'dlg-btns' }, buttons.map((b) => h('button', {
+    buttons.length ? h('div', { class: 'dlg-btns' + (stack ? ' stack' : '') }, buttons.map((b) => h('button', {
       class: 'btn ' + (b.kind === 'primary' ? 'fill' : b.kind === 'danger' ? 'fill dlgdanger' : 'muted'),
       onclick: async () => { if (b.keep !== true) close(); if (b.onclick) await b.onclick(close); },
-    }, b.label))) : null);
+    }, b.icon ? [h('span', { class: 'bic' }, ico(b.icon)), b.label] : b.label))) : null);
   const back = h('div', { class: 'dlg-back', onclick: (e) => { if (e.target === back && cancelable) close(); } }, box);
   document.body.append(back);
   return { close, box };
@@ -337,6 +338,7 @@ function xlStyle(c, st) {
 // opts: { header: style, rowStyle: (i,row)=>style, boldCols: [idx], frozen: bool }
 async function downloadXlsx(filename, sheetName, header, rows, widths, opts) {
   opts = opts || {};
+  await loadScript('vendor/exceljs.bare.min.js', 'ExcelJS');
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet(sheetName, { views: [{ rightToLeft: true, state: opts.frozen ? 'frozen' : 'normal', ySplit: opts.frozen ? 1 : 0 }] });
   ws.columns = header.map((_, i) => ({ width: (widths || [])[i] || 20 }));

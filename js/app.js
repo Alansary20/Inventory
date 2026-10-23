@@ -36,26 +36,27 @@ const TABS = [
   const menuBtn = h('button', { class: 'hbtn end', 'aria-label': 'النسخ الاحتياطي', onclick: backupMenu }, '☰');
 
   function backupMenu() {
-    dialog({ title: 'النسخ الاحتياطي', icon: 'upload', message: 'كل بياناتك محفوظة داخل هذا المتصفح فقط. احفظ نسخة احتياطية لتنقلها إلى جهاز آخر أو لتحميها من الضياع.',
+    dialog({ title: 'النسخ الاحتياطي', icon: 'download', stack: true, message: 'كل بياناتك محفوظة داخل هذا المتصفح فقط. احفظ نسخة احتياطية لتنقلها إلى جهاز آخر أو لتحميها من الضياع.',
       buttons: [
-        { label: 'إغلاق' },
-        { label: '⬇ حفظ نسخة احتياطية', kind: 'primary', onclick: () => {
+        { label: 'حفظ نسخة احتياطية', icon: 'download', kind: 'primary', onclick: () => {
           const blob = new Blob([Store.exportDb()], { type: 'application/octet-stream' });
           const a = h('a', { href: URL.createObjectURL(blob), download: `jard-backup_${dateStr()}.db` }); document.body.append(a); a.click(); a.remove();
           toast('تم حفظ النسخة الاحتياطية');
         } },
-        { label: '⬆ استعادة نسخة', onclick: async () => {
+        { label: 'استعادة نسخة', icon: 'upload', onclick: async () => {
           const f = await pickFiles(false); if (!f.length) return;
           if (!(await confirmDlg('استعادة نسخة', 'سيتم استبدال كل البيانات الحالية بمحتوى النسخة. متابعة؟', 'استعادة'))) return;
           try { await Store.importDb(await f[0].arrayBuffer()); Object.values(app.views).forEach((v) => v.refresh()); updateStats(); toast('تمت الاستعادة'); }
           catch (e) { toast('الملف ليس نسخة احتياطية صالحة'); }
         } },
+        { label: 'إغلاق' },
       ] });
   }
 
   function show(key) {
     app.current = key;
-    if (app.views[key].stop === undefined || true) for (const k in app.views) if (k !== key && app.views[k].stop) app.views[k].stop();
+    for (const k in app.views) if (k !== key && app.views[k].stop) app.views[k].stop();
+    if (!app.views[key]) { const nv = Views[key](app); nv.dirty = false; app.views[key] = nv; main.append(nv.el); }
     const v = app.views[key];
     if (v.dirty) { v.refresh(); v.dirty = false; }
     for (const k in app.views) app.views[k].el.style.display = k === key ? '' : 'none';
@@ -65,7 +66,6 @@ const TABS = [
   }
   for (const [key, label] of TABS) {
     tabBar.append(h('button', { 'data-k': key, class: 't-' + key, onclick: () => show(key) }, h('span', { class: 'ic' }, ico(key)), h('span', { class: 'lb' }, label)));
-    const v = Views[key](app); v.dirty = false; app.views[key] = v; v.el.style.display = 'none'; main.append(v.el);
   }
   document.getElementById('app').append(
     h('header', null, themeBtn, h('h1', null, 'جرد & مخزون & أسعار'), menuBtn),
@@ -74,5 +74,10 @@ const TABS = [
   boot.remove();
   updateStats();
   show(localStorage.getItem('tab') && app.views[localStorage.getItem('tab')] ? localStorage.getItem('tab') : 'scan');
-  if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+  if ('serviceWorker' in navigator) {
+    const had = !!navigator.serviceWorker.controller; let reloaded = false;
+    // عند صدور نسخة جديدة نعيد التحميل مرة واحدة لتظهر فوراً
+    navigator.serviceWorker.addEventListener('controllerchange', () => { if (had && !reloaded) { reloaded = true; location.reload(); } });
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+  }
 })();

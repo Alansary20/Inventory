@@ -162,3 +162,14 @@ function pickLongestBarcode(cell) { const parts = splitCodes(cell); return parts
 function altList(altBarcodes) {
   return String(altBarcodes || '').split(',').map((x) => x.trim()).filter((x) => x);
 }
+
+// تحميل مكتبة ثقيلة عند الحاجة فقط (يسرّع فتح الموقع)
+const _scriptP = {};
+function loadScript(src, globalName) {
+  if (globalName && window[globalName]) return Promise.resolve();
+  if (!_scriptP[src]) _scriptP[src] = new Promise((res, rej) => {
+    const s = document.createElement('script'); s.src = src; s.onload = () => res(); s.onerror = () => { delete _scriptP[src]; rej(new Error('تعذّر تحميل ' + src)); };
+    document.head.append(s);
+  });
+  return _scriptP[src];
+}

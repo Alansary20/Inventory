@@ -213,7 +213,7 @@ Views.stock = (app) => {
     } catch (e) { toast('تعذّرت قراءة الملف: ' + e.message); }
   }
   function doExport() {
-    const all = Store.allStock().sort((a, b) => (a.branch < b.branch ? -1 : a.branch > b.branch ? 1 : a.key < b.key ? -1 : 1));
+    const all = [...Store.allStock()].sort((a, b) => (a.branch < b.branch ? -1 : a.branch > b.branch ? 1 : a.key < b.key ? -1 : 1));
     downloadXlsx(`رصيد_${dateStr()}.xlsx`, 'الرصيد', ['رقم الصنف', 'الاسم', 'كمية الرصيد', 'الفرع'], all.map((s) => [s.key, s.name, s.qty, s.branch]), [18, 36, 16, 20]);
     toast(`تم تصدير ${all.length} منتج`);
   }
@@ -229,6 +229,10 @@ Views.stock = (app) => {
   root.append(h('div', { class: 'vh' },
     importCard('رفع ملف رصيد النظام', fileBtn, mode, 'معالجة ورفع الرصيد', doImport),
     h('button', { class: 'btn mb10', onclick: doExport }, 'تصدير الرصيد'),
+    h('button', { class: 'btn danger mb10', onclick: async () => {
+      if (!await confirmDlg('حذف كل الرصيد', 'سيتم حذف رصيد كل الفروع نهائياً. هل أنت متأكد؟', 'حذف')) return;
+      Store.clearStock(); Store.setBranch(Store.DEFAULT_BRANCH); toast('تم حذف كل الرصيد'); refresh(); app.changed();
+    } }, 'حذف كل الرصيد'),
     brBar,
     searchBox((v) => { query = v; refresh(); }), count), holder);
   refresh();
@@ -327,7 +331,7 @@ Views.products = (app) => {
     } catch (e) { toast('تعذّرت قراءة الملف: ' + e.message); console.error(e); }
   }
   function doExport() {
-    const all = Store.allProducts().sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
+    const all = [...Store.allProducts()].sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
     downloadXlsx(`منتجات_${dateStr()}.xlsx`, 'المنتجات', ['الباركود', 'رقم الصنف', 'الاسم', 'السعر الأساسي', 'السعر بعد الخصم'],
       all.map((p) => [allBarcodes(p).join(', '), p.itemNo, p.name, p.priceOrig, p.priceSale !== 0 ? p.priceSale : p.priceOrig]), [22, 18, 40, 16, 16]);
     toast(`تم تصدير ${all.length} منتج`);

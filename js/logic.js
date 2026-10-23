@@ -101,7 +101,8 @@ const PricesIndex = (() => {
     const sumOf = (m) => { let t = 0; for (const v of m.values()) t += v; return t; };
     const brList = (m) => allBranches.map((b) => [b, (m && m.get(b)) || 0]).sort((x, y) => y[1] - x[1]);  // الأعلى رصيداً أولاً
     const items = [], byCode = new Map(), byBarcode = new Map(), matched = new Set();
-    const mk = (o) => Object.assign(o, { lcName: Ar.norm(o.name), lcCode: o.code.toLowerCase(), lcItem: o.itemNo.toLowerCase(), lcBar: o.barcode.toLowerCase() });
+    const PProto = { get lcName() { return this._ln !== undefined ? this._ln : (this._ln = Ar.norm(this.name)); } };   // يُحسب عند أول استخدام فقط
+    const mk = (o) => Object.assign(Object.create(PProto), o, { lcCode: o.code.toLowerCase(), lcItem: o.itemNo.toLowerCase(), lcBar: o.barcode.toLowerCase() });
     for (const p of prods) {
       const code = p.itemNo || p.barcode;
       if (!code) continue;
@@ -135,7 +136,7 @@ const PricesIndex = (() => {
       if (itemNo) byCode.set(itemNo, item);
       if (bc) { byCode.set(bc, item); byBarcode.set(bc, item); }
     }
-    items.sort((a, b) => (b.stock - a.stock) || (a.lcName < b.lcName ? -1 : a.lcName > b.lcName ? 1 : 0));
+    items.sort((a, b) => (b.stock - a.stock) || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
     const norm = new Map();
     for (const [k, v] of byBarcode) { const n = normBarcode(k); if (n && !norm.has(n)) norm.set(n, v); }
     return {
@@ -214,7 +215,7 @@ function buildCompare() {
     if (p.barcode && p.barcode !== p.itemNo) prodsMap.set(p.barcode, p);
     for (const ab of altList(p.altBarcodes)) if (ab !== p.itemNo) prodsMap.set(ab, p);
   }
-  const names = Names.get();
+  let namesIdx = null; const names = { exact: (k) => (namesIdx || (namesIdx = Names.get())).exact(k) };
   const canonical = (k) => {
     const p = prodsMap.get(k);
     if (p && p.itemNo) return p.itemNo;
@@ -254,6 +255,7 @@ function buildCompare() {
 // ───────── قراءة الملفات (Excel / CSV) ─────────
 const TableReader = {
   async readBook(file) {
+    await loadScript('vendor/xlsx.full.min.js', 'XLSX');
     const buf = await file.arrayBuffer();
     return XLSX.read(buf, { type: 'array', cellDates: false, raw: true });
   },
