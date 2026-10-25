@@ -81,7 +81,7 @@ function branchDialog(onChanged) {
   const list = h('div'), cur = () => Store.getBranch();
   let d = null;
   const paint = () => {
-    const bs = Store.branches();
+    const bs = [...Store.branches()];
     if (!bs.some((b) => b[0] === cur())) bs.unshift([cur(), 0]);
     list.replaceChildren(...bs.map(([name, n]) => {
       const on = name === cur();

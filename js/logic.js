@@ -8,7 +8,7 @@ const unknownLabels = () => [...new Set([UNKNOWN_NAME, '❓ غير معروف', 
 const Names = (() => {
   let cache = null;
   function build(version) {
-    const prods = Store.allProducts(), stock = Store.allStock();
+    const prods = Store.allProducts(), stock = Store.stockNames();
     const list = [], codes = new Set(), nkByCode = new Map();
     const add = (name, itemNo, barcode, key) => {
       if (!String(name).trim()) return;
@@ -89,19 +89,23 @@ const PricesIndex = (() => {
     return t.replace(/^0+/, '') || null;
   };
   function build(version) {
-    const prods = Store.allProducts(), stockArr = Store.allStock();
-    const nameMap = new Map();
-    const allBranches = Store.branches().map((b) => b[0]);
-    const qtyMap = new Map(); // key -> Map(branch -> qty)
-    for (const s of stockArr) {
-      let m = qtyMap.get(s.key); if (!m) { m = new Map(); qtyMap.set(s.key, m); }
-      m.set(s.branch, (m.get(s.branch) || 0) + s.qty);
-      if (!nameMap.has(s.key)) nameMap.set(s.key, s.name || s.key);
-    }
-    const sumOf = (m) => { let t = 0; for (const v of m.values()) t += v; return t; };
-    const brList = (m) => allBranches.map((b) => [b, (m && m.get(b)) || 0]).sort((x, y) => y[1] - x[1]);  // الأعلى رصيداً أولاً
+    const prods = Store.allProducts(), stockArr = Store.stockTotals();   // صف لكل صنف (إجمالي الفروع)
+    const nameMap = new Map(), totalMap = new Map();
+    for (const s of stockArr) { totalMap.set(s.key, s.qty); nameMap.set(s.key, s.name || s.key); }
     const items = [], byCode = new Map(), byBarcode = new Map(), matched = new Set();
-    const PProto = { get lcName() { return this._ln !== undefined ? this._ln : (this._ln = Ar.norm(this.name)); } };   // يُحسب عند أول استخدام فقط
+    // الرصيد بالفروع يُحسب عند عرض التفاصيل فقط (مرتباً: الأعلى أولاً)
+    const PProto = {
+      get lcName() { return this._ln !== undefined ? this._ln : (this._ln = Ar.norm(this.name)); },
+      get branches() {
+        if (this._br) return this._br;
+        let rows = [];
+        const tryKey = (k) => { if (k && totalMap.has(k)) rows = Store.stockByBranch(k); };
+        if (this.product) { tryKey(this.itemNo); tryKey(this.barcode); } else tryKey(this.code);
+        const m = new Map(rows.map((r) => [r.branch, r.qty]));
+        return (this._br = Store.branches().map((b) => [b[0], m.get(b[0]) || 0]).sort((x, y) => y[1] - x[1]));
+      },
+      get multi() { return Store.branches().length > 1; },
+    };
     const mk = (o) => Object.assign(Object.create(PProto), o, { lcCode: o.code.toLowerCase(), lcItem: o.itemNo.toLowerCase(), lcBar: o.barcode.toLowerCase() });
     for (const p of prods) {
       const code = p.itemNo || p.barcode;
@@ -109,28 +113,25 @@ const PricesIndex = (() => {
       const name = p.name || code;
       const orig = p.priceOrig, sale = p.priceSale !== 0 ? p.priceSale : orig;
       const disc = orig > 0 ? Math.round((orig - sale) / orig * 100) : 0;
-      let stk = 0, bm = null;
-      if (p.itemNo && qtyMap.has(p.itemNo)) { bm = qtyMap.get(p.itemNo); stk = sumOf(bm); matched.add(p.itemNo); }
-      if (p.barcode && qtyMap.has(p.barcode)) { bm = qtyMap.get(p.barcode); stk = sumOf(bm); matched.add(p.barcode); }
+      let stk = 0;
+      if (p.itemNo && totalMap.has(p.itemNo)) { stk = totalMap.get(p.itemNo); matched.add(p.itemNo); }
+      if (p.barcode && totalMap.has(p.barcode)) { stk = totalMap.get(p.barcode); matched.add(p.barcode); }
       const alts = altList(p.altBarcodes);
       const codes = [];
       if (p.barcode) codes.push(p.barcode);
       for (const a of alts) if (a !== p.barcode) codes.push(a);
-      const item = mk({ code, name, orig, sale, disc, stock: stk, branches: brList(bm), itemNo: p.itemNo, barcode: p.barcode, product: p, barcodes: codes });
+      const item = mk({ code, name, orig, sale, disc, stock: stk, itemNo: p.itemNo, barcode: p.barcode, product: p, barcodes: codes });
       items.push(item);
       if (p.itemNo) { byCode.set(p.itemNo, item); matched.add(p.itemNo); }
       if (p.barcode) { byCode.set(p.barcode, item); byBarcode.set(p.barcode, item); matched.add(p.barcode); }
       for (const a of alts) { byCode.set(a, item); byBarcode.set(a, item); matched.add(a); }
     }
-    const doneKeys = new Set();
     for (const s of stockArr) {
-      if (matched.has(s.key) || doneKeys.has(s.key)) continue;
-      doneKeys.add(s.key);
-      const bm = qtyMap.get(s.key);
+      if (matched.has(s.key)) continue;
       const code = s.key, keyDigits = /^\d+$/.test(code);
       const itemNo = s.itemNo || (!keyDigits ? code : '');
       const bc = s.barcode || (keyDigits ? code : '');
-      const item = mk({ code, name: nameMap.get(code) || code, orig: 0, sale: 0, disc: 0, stock: sumOf(bm), branches: brList(bm), itemNo, barcode: bc, product: null, barcodes: bc ? [bc] : [] });
+      const item = mk({ code, name: nameMap.get(code) || code, orig: 0, sale: 0, disc: 0, stock: s.qty, itemNo, barcode: bc, product: null, barcodes: bc ? [bc] : [] });
       items.push(item);
       byCode.set(code, item);
       if (itemNo) byCode.set(itemNo, item);
@@ -460,7 +461,8 @@ async function importStock(sources, cols, noHeader, merge, progress) {
   const cur = Store.getBranch();
   const bk = (b, c) => b + '\u0001' + c;
   const byKey = new Map(), cleared = new Set(), fileBranches = [];
-  if (merge) for (const e of Store.allStock()) { if (e.itemNo) byKey.set(bk(e.branch, e.itemNo), e); if (e.barcode) byKey.set(bk(e.branch, e.barcode), e); byKey.set(bk(e.branch, e.key), e); }
+  const loaded = new Set();   // في الدمج نحمّل رصيد الفرع الحالي في الملف فقط عند أول ظهور له
+  const loadBranch = (b) => { if (!merge || loaded.has(b)) return; loaded.add(b); for (const e of Store.allStock(b)) { if (e.itemNo) byKey.set(bk(b, e.itemNo), e); if (e.barcode) byKey.set(bk(b, e.barcode), e); byKey.set(bk(b, e.key), e); } };
   for (let fi = 0; fi < sources.length; fi++) {
     const src = sources[fi];
     const rows = noHeader ? src.rows : src.rows.slice(1);
@@ -474,6 +476,7 @@ async function importStock(sources, cols, noHeader, merge, progress) {
         if (!key) continue;
         const branch = cellOf(r, cols[4]) || cur;
         if (!fileBranches.includes(branch)) fileBranches.push(branch);
+        loadBranch(branch);
         // تحديث: يُمسح فقط رصيد الفروع الموجودة في الملف (عند أول ظهور لكل فرع)
         if (!merge && !cleared.has(branch)) { Store.clearStockBranches([branch]); cleared.add(branch); }
         const name = cellOf(r, cols[2]);

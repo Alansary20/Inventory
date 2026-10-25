@@ -38,6 +38,7 @@ const Store = (() => {
     "CREATE INDEX IF NOT EXISTS idx_products_item_no ON products(item_no)",
     "CREATE TABLE IF NOT EXISTS inventory (key TEXT PRIMARY KEY, name TEXT NOT NULL DEFAULT '', qty INTEGER NOT NULL DEFAULT 0, barcode TEXT NOT NULL DEFAULT '', item_no TEXT NOT NULL DEFAULT '', timestamp INTEGER NOT NULL DEFAULT 0)",
     "CREATE TABLE IF NOT EXISTS stock (branch TEXT NOT NULL DEFAULT '', key TEXT NOT NULL, item_no TEXT NOT NULL DEFAULT '', barcode TEXT NOT NULL DEFAULT '', name TEXT NOT NULL DEFAULT '', qty REAL NOT NULL DEFAULT 0, PRIMARY KEY (branch, key))",
+    "CREATE INDEX IF NOT EXISTS idx_stock_key ON stock(key)",
     "CREATE INDEX IF NOT EXISTS idx_stock_item_no ON stock(item_no)",
     "CREATE INDEX IF NOT EXISTS idx_stock_barcode ON stock(barcode)",
     "CREATE TABLE IF NOT EXISTS uploaded_files (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, kind TEXT NOT NULL, timestamp INTEGER NOT NULL)",
@@ -248,10 +249,17 @@ const Store = (() => {
     ? all(`SELECT ${S_COLS} FROM stock WHERE branch = ? AND (name GLOB ? OR key LIKE ? ESCAPE '\\' OR barcode LIKE ? ESCAPE '\\') ORDER BY name COLLATE NOCASE LIMIT ? OFFSET ?`,
         [branch, Ar.glob(q), Ar.like(q), Ar.like(q), limit, offset])
     : all(`SELECT ${S_COLS} FROM stock WHERE branch = ? ORDER BY name COLLATE NOCASE LIMIT ? OFFSET ?`, [branch, limit, offset])).map(toStock);
-  let asCache = null, asVer = -1;
-  const allStockRaw = () => { if (asVer !== state.dataVersion || !asCache) { asCache = all(`SELECT ${S_COLS} FROM stock`).map(toStock); asVer = state.dataVersion; } return asCache; };
-  const allStock = (branch) => (branch == null ? allStockRaw() : allStockRaw().filter((s) => s.branch === branch));
-  const branches = () => all('SELECT branch, COUNT(*) AS n FROM stock GROUP BY branch ORDER BY branch COLLATE NOCASE').map((r) => [r.branch, r.n]);
+  // لا نحمّل كل صفوف الرصيد في الذاكرة (قد تكون عشرات الآلاف × الفروع): تجميع في SQL ونتائج مخزّنة حتى تتغير البيانات
+  const memo = (fn) => { const c = new Map(); let ver = -1; return (k = '') => { if (ver !== state.dataVersion) { c.clear(); ver = state.dataVersion; } if (!c.has(k)) c.set(k, fn(k)); return c.get(k); }; };
+  const allStockBranch = memo((b) => all(`SELECT ${S_COLS} FROM stock WHERE branch = ?`, [b]).map(toStock));
+  const allStock = (branch) => (branch == null ? all(`SELECT ${S_COLS} FROM stock`).map(toStock) : allStockBranch(branch));
+  // صف واحد لكل صنف: الإجمالي عبر الفروع
+  const stockTotals = memo(() => all('SELECT key, MAX(item_no) AS item_no, MAX(barcode) AS barcode, MAX(name) AS name, SUM(qty) AS qty FROM stock GROUP BY key').map((r) => ({ key: r.key, itemNo: r.item_no, barcode: r.barcode, name: r.name, qty: r.qty })));
+  // أسماء الرصيد المختلفة فقط (للبحث بالاسم)
+  const stockNames = memo(() => all('SELECT key, item_no, barcode, name FROM stock GROUP BY key, name').map((r) => ({ key: r.key, itemNo: r.item_no, barcode: r.barcode, name: r.name })));
+  // رصيد صنف في كل فرع (يُطلب عند عرض التفاصيل فقط)
+  const stockByBranch = (key) => all('SELECT branch, SUM(qty) AS qty FROM stock WHERE key = ? GROUP BY branch', [key]);
+  const branches = memo(() => all('SELECT branch, COUNT(*) AS n FROM stock GROUP BY branch ORDER BY branch COLLATE NOCASE').map((r) => [r.branch, r.n]));
   function upsertStock(list) {
     bump();
     if (!list.length) return;
@@ -343,7 +351,7 @@ const Store = (() => {
     upsertProducts, deleteProducts, deleteProduct, clearProducts, addUploadedFile,
     addToInventory, searchInventory, allInventory, searchLog, logPlus, logMinus, logDelete, logSetQty,
     clearInventoryAndLog, importInventory,
-    searchStock, allStock, upsertStock, clearStock, clearStockBranches, deleteBranch, branches,
+    searchStock, allStock, stockTotals, stockNames, stockByBranch, upsertStock, clearStock, clearStockBranches, deleteBranch, branches,
     DEFAULT_BRANCH, getBranch, setBranch,
     purgeZeroInventory, repairNameKeys, resolveUnknown, reconcile,
     exportDb, importDb, wipeAll,

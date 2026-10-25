@@ -433,8 +433,8 @@ Views.prices = (app) => {
       h('div', { class: 'pname' }, r.name || '—'),
       (r.itemNo || r.barcodes.length) ? h('div', { class: 'codes' }, r.itemNo ? codeRow('🔢 رقم الصنف', r.itemNo, false) : null, r.barcodes.map((b) => codeRow('📦 الباركود', b, true))) : null,
       h('div', { class: 'tiles' }, tile('السعر الأساسي', r.orig ? fmtQty(r.orig) : '—', 'orig'), tile('السعر بعد الخصم', r.sale ? fmtQty(r.sale) : '—', 'sale'),
-        tile('الخصم', r.disc + '%', 'disc'), tile(r.branches.length > 1 ? 'إجمالي الرصيد' : 'الرصيد', fmtQty(r.stock), 'stk ' + stockCls(r.stock))),
-      r.branches.length > 1 ? h('div', { style: 'margin-top:10px' }, h('div', { class: 'fld-l', style: 'font-weight:700;margin-bottom:6px' }, '🏬 الرصيد بالفروع'),
+        tile('الخصم', r.disc + '%', 'disc'), tile(r.multi ? 'إجمالي الرصيد' : 'الرصيد', fmtQty(r.stock), 'stk ' + stockCls(r.stock))),
+      r.multi ? h('div', { style: 'margin-top:10px' }, h('div', { class: 'fld-l', style: 'font-weight:700;margin-bottom:6px' }, '🏬 الرصيد بالفروع'),
         r.branches.map(([b, q]) => h('div', { class: 'irow', style: 'margin-bottom:6px' + (b === Store.getBranch() ? ';border-color:var(--accent)' : '') }, h('b', { class: 'grow ell nm', style: b === Store.getBranch() ? 'color:var(--accent)' : '' }, b), h('div', { class: 'qbadge ' + qtyClass(q) }, fmtQty(q))))) : null);
   }
   const productRow = (r) => {
