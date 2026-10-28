@@ -98,10 +98,9 @@ const PricesIndex = (() => {
       get lcName() { return this._ln !== undefined ? this._ln : (this._ln = Ar.norm(this.name)); },
       get branches() {
         if (this._br) return this._br;
-        let rows = [];
-        const tryKey = (k) => { if (k && totalMap.has(k)) rows = Store.stockByBranch(k); };
-        if (this.product) { tryKey(this.itemNo); tryKey(this.barcode); } else tryKey(this.code);
-        const m = new Map(rows.map((r) => [r.branch, r.qty]));
+        const m = new Map();
+        const tryKey = (k) => { if (k && totalMap.has(k)) for (const r of Store.stockByBranch(k)) m.set(r.branch, (m.get(r.branch) || 0) + r.qty); };
+        if (this.product) this.skeys.forEach(tryKey); else tryKey(this.code);
         return (this._br = Store.branches().map((b) => [b[0], m.get(b[0]) || 0]).sort((x, y) => y[1] - x[1]));
       },
       get multi() { return Store.branches().length > 1; },
@@ -113,14 +112,14 @@ const PricesIndex = (() => {
       const name = p.name || code;
       const orig = p.priceOrig, sale = p.priceSale !== 0 ? p.priceSale : orig;
       const disc = orig > 0 ? Math.round((orig - sale) / orig * 100) : 0;
-      let stk = 0;
-      if (p.itemNo && totalMap.has(p.itemNo)) { stk = totalMap.get(p.itemNo); matched.add(p.itemNo); }
-      if (p.barcode && totalMap.has(p.barcode)) { stk = totalMap.get(p.barcode); matched.add(p.barcode); }
       const alts = altList(p.altBarcodes);
+      let stk = 0;
+      const skeys = new Set([p.itemNo, p.barcode, ...alts].filter(Boolean));
+      for (const k of skeys) if (totalMap.has(k)) { stk += totalMap.get(k); matched.add(k); }
       const codes = [];
       if (p.barcode) codes.push(p.barcode);
       for (const a of alts) if (a !== p.barcode) codes.push(a);
-      const item = mk({ code, name, orig, sale, disc, stock: stk, itemNo: p.itemNo, barcode: p.barcode, product: p, barcodes: codes });
+      const item = mk({ code, name, orig, sale, disc, stock: stk, itemNo: p.itemNo, barcode: p.barcode, product: p, barcodes: codes, skeys: [...skeys] });
       items.push(item);
       if (p.itemNo) { byCode.set(p.itemNo, item); matched.add(p.itemNo); }
       if (p.barcode) { byCode.set(p.barcode, item); byBarcode.set(p.barcode, item); matched.add(p.barcode); }
@@ -242,7 +241,7 @@ function buildCompare() {
     const i = invMap.get(k), s = stockMap.get(k);
     const qi = i ? i.qty : 0, qs = s ? s.qty : 0, diff = qi - qs;
     const fp = prodsMap.get(k);
-    const isDash = /^\d+-[\d-]+$/.test(k), isDigits = /^\d+$/.test(k);
+    const isDigits = Codes.isBarcode(k), isDash = !isDigits && Codes.isItemNo(k);
     const itemNo = ((i && i.itemNo) || (s && s.itemNo) || '') || (fp && fp.itemNo) || (isDash ? k : '');
     const barcode = ((i && i.barcode) || (s && s.barcode) || '') || (fp && fp.barcode) || (isDigits ? k : '');
     const invName = i ? i.name : '';
@@ -283,7 +282,7 @@ const ColumnDetector = (() => {
     LAST_SCAN: ['آخر مسح', 'تاريخ', 'date', 'time', 'الوقت', 'last scan', 'مسح'],
   };
   const has = (h, words) => words.some((w) => h.includes(w));
-  const isNumber = (s) => { const t = String(s).replace(/,/g, ''); return t !== '' && Number.isFinite(Number(t)); };
+  const isNumber = (s) => parseNumber(s) !== null;
   const looksDate = (s) => s.length >= 8 && /\d/.test(s) && (s.includes(':') || /\d{4}-\d{1,2}-\d{1,2}/.test(s) || /\d{1,2}\/\d{1,2}\/\d{2,4}/.test(s));
   function looksLikeHeader(row) {
     if (!row) return false;
@@ -461,6 +460,7 @@ async function importStock(sources, cols, noHeader, merge, progress) {
   const cur = Store.getBranch();
   const bk = (b, c) => b + '\u0001' + c;
   const byKey = new Map(), cleared = new Set(), fileBranches = [];
+  const acc = new Map();   // الاستبدال: تجميع كل الملفات قبل أي حذف أو كتابة
   const loaded = new Set();   // في الدمج نحمّل رصيد الفرع الحالي في الملف فقط عند أول ظهور له
   const loadBranch = (b) => { if (!merge || loaded.has(b)) return; loaded.add(b); for (const e of Store.allStock(b)) { if (e.itemNo) byKey.set(bk(b, e.itemNo), e); if (e.barcode) byKey.set(bk(b, e.barcode), e); byKey.set(bk(b, e.key), e); } };
   for (let fi = 0; fi < sources.length; fi++) {
@@ -468,7 +468,7 @@ async function importStock(sources, cols, noHeader, merge, progress) {
     const rows = noHeader ? src.rows : src.rows.slice(1);
     for (let start = 0; start < rows.length;) {
       const end = Math.min(start + 500, rows.length);
-      const batch = new Map();
+      const batch = merge ? new Map() : acc;
       for (let ri = start; ri < end; ri++) {
         const r = rows[ri];
         const [barcode, itemNo] = Codes.fix(pickLongestBarcode(cellOf(r, cols[1])), cellOf(r, cols[0]));
@@ -478,10 +478,9 @@ async function importStock(sources, cols, noHeader, merge, progress) {
         if (!fileBranches.includes(branch)) fileBranches.push(branch);
         loadBranch(branch);
         // تحديث: يُمسح فقط رصيد الفروع الموجودة في الملف (عند أول ظهور لكل فرع)
-        if (!merge && !cleared.has(branch)) { Store.clearStockBranches([branch]); cleared.add(branch); }
         const name = cellOf(r, cols[2]);
         const qn = parseNumber(cellOf(r, cols[3]));
-        const qty = qn == null ? 0 : Math.trunc(qn);
+        const qty = qn == null ? 0 : qn;
         const ex = merge ? ((itemNo ? byKey.get(bk(branch, itemNo)) : null) || (barcode ? byKey.get(bk(branch, barcode)) : null)) : null;
         const same = batch.get(bk(branch, ex ? ex.key : key));
         const base = same || ex;
@@ -490,12 +489,17 @@ async function importStock(sources, cols, noHeader, merge, progress) {
         batch.set(bk(branch, rec.key), rec);
         if (merge) { if (rec.itemNo) byKey.set(bk(branch, rec.itemNo), rec); if (rec.barcode) byKey.set(bk(branch, rec.barcode), rec); byKey.set(bk(branch, rec.key), rec); }
       }
-      Store.upsertStock([...batch.values()]);
+      if (merge) Store.upsertStock([...batch.values()]);
       start = end;
       progress((fi + start / Math.max(1, rows.length)) / sources.length, `${src.name}  ${start} / ${rows.length}`);
       await new Promise((r) => setTimeout(r, 0));
     }
     Store.addUploadedFile(src.name, 'stock');
+  }
+  if (!merge) {
+    const all = [...acc.values()];
+    Store.clearStockBranches([...new Set(all.map((x) => x.branch))]);
+    for (let i = 0; i < all.length; i += 2000) Store.upsertStock(all.slice(i, i + 2000));
   }
   // إن لم يكن للفرع الحالي رصيد نحوّل الجرد إلى أول فرع في الملف
   if (fileBranches.length && Store.countStock(Store.getBranch()) === 0) Store.setBranch(fileBranches[0]);
@@ -509,7 +513,7 @@ function importInventoryRows(src, cols, noHeader, merge) {
   for (const r of rows) {
     const [bc, inNo] = Codes.fix(pickLongestBarcode(cellOf(r, cols[0])), cellOf(r, cols[1]));
     const qn = parseNumber(cellOf(r, cols[3]));
-    const qty = qn == null ? 0 : Math.trunc(qn);
+    const qty = qn == null ? 0 : Math.round(qn);
     if ((!bc && !inNo) || qty <= 0) continue;
     parsed.push({ key: inNo || bc, name: cellOf(r, cols[2]), qty, barcode: bc, itemNo: inNo, timestamp: now });
   }

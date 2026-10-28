@@ -56,7 +56,7 @@ const Codes = (() => {
   const isBarcode = (s) => barcodeRe.test(String(s).trim());
   const isItemNo = (s) => {
     const t = String(s).trim();
-    return t.length <= 40 && !isBarcode(t) && itemRe.test(t) && /\d/.test(t);
+    return t.length <= 40 && !isBarcode(t) && itemRe.test(t) && /\d/.test(t) && !/^\d+[.,]\d+$|^\d{4}-\d{1,2}-\d{1,2}$|^\d{1,2}\/\d{1,2}\/\d{2,4}$/.test(t);
   };
   const looksLikeName = (s) => {
     const t = String(s).trim();
@@ -124,9 +124,15 @@ function parseNumber(s) {
     const c = ch.charCodeAt(0);
     if (c >= 0x660 && c <= 0x669) o += String.fromCharCode(48 + c - 0x660);
     else if (c >= 0x6F0 && c <= 0x6F9) o += String.fromCharCode(48 + c - 0x6F0);
-    else if (ch === '٫') o += '.';
-    else if (ch === ',' || ch === '٬' || ch === ' ' || ch === ' ') continue;
+    else if (c === 0x66B) o += '.';
+    else if (c === 0x66C || c === 0x20 || c === 0xA0 || c === 0x202F) continue;
     else o += ch;
+  }
+  const lc = o.lastIndexOf(','), ld = o.lastIndexOf('.');
+  if (lc >= 0 && ld >= 0) o = lc > ld ? o.replace(/\./g, '').replace(',', '.') : o.replace(/,/g, '');
+  else if (lc >= 0) {
+    const cnt = (o.match(/,/g) || []).length;
+    o = (cnt === 1 && o.length - lc - 1 !== 3) ? o.replace(',', '.') : o.replace(/,/g, '');
   }
   if (o === '' || !/^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$/.test(o)) return null;
   const n = Number(o);

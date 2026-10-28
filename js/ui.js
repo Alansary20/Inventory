@@ -416,7 +416,13 @@ function mapColumns(fileName, rows, fields) {
 async function readFiles(fileList) {
   const out = [];
   for (const f of fileList) {
-    const wb = await TableReader.readBook(f);
+    const wait = progressDialog('جارٍ قراءة الملف…');
+    wait.set(0.5, f.name);
+    await new Promise((r) => setTimeout(r, 30));   // يتيح رسم النافذة قبل القراءة الثقيلة
+    let wb;
+    try { wb = await TableReader.readBook(f); }
+    catch (e) { wait.close(); toast('تعذّرت قراءة الملف: ' + (e.message || e)); return null; }
+    wait.close();
     let sheet = wb.SheetNames[0];
     if (wb.SheetNames.length > 1) {
       sheet = await new Promise((res) => {
