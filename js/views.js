@@ -214,7 +214,14 @@ Views.stock = (app) => {
   }
   function doExport() {
     const all = [...Store.allStock()].sort((a, b) => (a.branch < b.branch ? -1 : a.branch > b.branch ? 1 : a.key < b.key ? -1 : 1));
-    downloadXlsx(`رصيد_${dateStr()}.xlsx`, 'الرصيد', ['رقم الصنف', 'الاسم', 'كمية الرصيد', 'الفرع'], all.map((s) => [s.key, s.name, s.qty, s.branch]), [18, 36, 16, 20]);
+    const pNo = new Map(), pBc = new Map();
+    for (const p of Store.allProducts()) { if (p.itemNo) pNo.set(p.itemNo, p); if (p.barcode) pBc.set(p.barcode, p); for (const a of altList(p.altBarcodes)) pBc.set(a, p); }
+    downloadXlsx(`رصيد_${dateStr()}.xlsx`, 'الرصيد', ['الباركود', 'رقم الصنف', 'الاسم', 'كمية الرصيد', 'الفرع'], all.map((s) => {
+      let bc = s.barcode || (Codes.isBarcode(s.key) ? s.key : ''), no = s.itemNo || (Codes.isBarcode(s.key) ? '' : s.key);
+      const p = (no && pNo.get(no)) || (bc && pBc.get(bc)) || pNo.get(s.key) || pBc.get(s.key);
+      if (p) { bc = bc || p.barcode; no = no || p.itemNo; }
+      return [bc, no, s.name, s.qty, s.branch];
+    }), [22, 18, 36, 16, 20]);
     toast(`تم تصدير ${all.length} منتج`);
   }
   const renderRow = (r) => h('div', { class: 'irow' },

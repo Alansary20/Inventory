@@ -503,6 +503,21 @@ async function importStock(sources, cols, noHeader, merge, progress) {
   }
   // إن لم يكن للفرع الحالي رصيد نحوّل الجرد إلى أول فرع في الملف
   if (fileBranches.length && Store.countStock(Store.getBranch()) === 0) Store.setBranch(fileBranches[0]);
+  // أصناف الرصيد التي ليست في المنتجات تُضاف إليها بسعر صفر
+  try {
+    const byNo = new Set(), byBc = new Set();
+    for (const p of Store.allProducts()) { if (p.itemNo) byNo.add(p.itemNo); if (p.barcode) byBc.add(p.barcode); for (const a of altList(p.altBarcodes)) byBc.add(a); }
+    const add = [], sid = Date.now();
+    for (const s of Store.stockTotals()) {
+      const isBc = Codes.isBarcode(s.key);
+      const bc = s.barcode || (isBc ? s.key : ''), no = s.itemNo || (isBc ? '' : s.key);
+      if (!bc && !no) continue;
+      if ((no && byNo.has(no)) || (bc && byBc.has(bc)) || byNo.has(s.key) || byBc.has(s.key)) continue;
+      if (no) byNo.add(no); if (bc) byBc.add(bc);
+      add.push({ id: uuid(), barcode: bc, itemNo: no, name: (s.name && s.name.trim()) || 'بدون اسم', altBarcodes: '', priceOrig: 0, priceSale: 0, sourceId: sid });
+    }
+    if (add.length) Store.upsertProducts(add);
+  } catch (e) {}
   Store.reconcile(unknownLabels());
   return { records: Store.countStock(), branches: Store.branches().length };
 }

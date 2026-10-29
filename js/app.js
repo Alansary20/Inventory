@@ -68,7 +68,7 @@ const TABS = [
     tabBar.append(h('button', { 'data-k': key, class: 't-' + key, onclick: () => show(key) }, h('span', { class: 'ic' }, ico(key)), h('span', { class: 'lb' }, label)));
   }
   document.getElementById('app').append(
-    h('header', null, themeBtn, h('h1', null, 'جرد & مخزون & أسعار'), menuBtn),
+    h('header', null, themeBtn, h('h1', null, 'جرد المخزون'), menuBtn),
     h('div', { class: 'stats' }, stat('إجمالي المنتجات', stats.products), stat('أصناف مجرودة', stats.items), stat('عمليات الجرد', stats.ops)),
     tabBar, main);
   boot.remove();
